@@ -2,14 +2,13 @@ use crossbeam_channel::unbounded;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufRead};
+
+use std::sync::Arc;
+use std::sync::RwLock;
 use std::thread;
 use std::thread::JoinHandle;
-use std::sync::Mutex;
-use std::sync::Arc;
 
-
-
-
+const NTHREADS: u8 = 5;
 #[derive(Debug)]
 enum FieldType {
     Int64,
@@ -30,100 +29,140 @@ struct FieldSchema {
     schema: Schema,
 }
 
-const DATA: &str = r#"
-        {
-            "name": "John Doe",
-            "age": 43,
-            "phones": [
-                "+44 1234567",
-                "+44 2345678"
-            ]
-        }"#;
-
 #[allow(unused)]
 fn match_field_type(v: &Value) -> (Option<FieldType>, bool) {
     match v {
-        Value::Null => (None,false),
-        Value::Bool(b) => (Some(FieldType::Bool),false),
+        Value::Null => (None, false),
+        Value::Bool(b) => (Some(FieldType::Bool), false),
         Value::Number(number) => {
             if number.is_f64() {
-                (Some(FieldType::Float64),false)
+                (Some(FieldType::Float64), false)
             } else if number.is_u64() {
-                (Some(FieldType::Int64),false)
+                (Some(FieldType::Int64), false)
             } else if number.is_i64() {
-                (Some(FieldType::Int64),false)
+                (Some(FieldType::Int64), false)
             } else {
-               ( None,false)
+                (None, false)
             }
         }
-        Value::String(s) => (Some(FieldType::String),false),
-        Value::Object(m) => (Some(FieldType::Record),false),
+        Value::String(s) => (Some(FieldType::String), false),
+        Value::Object(m) => (Some(FieldType::Record), false),
 
         Value::Array(a) => match &a[0] {
-            Value::Null => (None,true),
-            Value::Bool(b) => (Some(FieldType::Bool),true),
+            Value::Null => (None, true),
+            Value::Bool(b) => (Some(FieldType::Bool), true),
             Value::Number(number) => {
                 if number.is_f64() {
-                    (Some(FieldType::Float64),true)
+                    (Some(FieldType::Float64), true)
                 } else if number.is_u64() {
-                    (Some(FieldType::Int64),true)
+                    (Some(FieldType::Int64), true)
                 } else if number.is_i64() {
-                    (Some(FieldType::Int64),true)
+                    (Some(FieldType::Int64), true)
                 } else {
-                    (None,true)
+                    (None, true)
                 }
             }
-            Value::String(s) => (Some(FieldType::String),true),
-            Value::Object(m) => (Some(FieldType::Record),true),
-            _ => (None,true)
+            Value::String(s) => (Some(FieldType::String), true),
+            Value::Object(m) => (Some(FieldType::Record), true),
+            _ => (None, true),
         },
     }
 }
 
-fn traverse_value_map(schema: Schema, value: &Value) {
+fn traverse_value_map(shared_state: Arc<RwLock<Schema>>, value: &Value) {
     if let Value::Object(m) = value {
         for (key, val) in m {
+            if !exists(Arc::clone(&shared_state), key.to_string()) {
+                let (fieldtype, repeated) = match_field_type(&val);
 
-            let (fieldtype,repeated) = match_field_type(&val);
-
-            if let Some(ft) = fieldtype {
-
-            let empty_schema:Schema = vec![];
-            let field = FieldSchema{name:key.clone(), fieldype:ft, repeated:repeated, required: false,schema:empty_schema};
-            println!("{:?}",field)
-            }            
+                if let Some(ft) = fieldtype {
+                    let empty_schema: Schema = vec![];
+                    let field = FieldSchema {
+                        name: key.clone(),
+                        fieldype: ft,
+                        repeated: repeated,
+                        required: false,
+                        schema: empty_schema,
+                    };
+                    append(Arc::clone(&shared_state), field);
+                }
+            }
         }
     }
 }
 
+fn exists(shared_state: Arc<RwLock<Schema>>, name: String) -> bool {
+    let mut schema = shared_state.read().unwrap();
+    let mut exists = false;
+    for field in schema.iter() {
+        if field.name == name {
+            exists = true;
+        }
+    }
+    exists
+}
+
+fn append(shared_state: Arc<RwLock<Schema>>, new_field: FieldSchema) {
+    let mut schema = shared_state.write().unwrap();
+    let mut exists = false;
+    for field in schema.iter() {
+        if field.name == new_field.name {
+            exists = true;
+        }
+    }
+    if !exists {
+        println!("{:?}", new_field);
+        schema.push(new_field);
+    }
+}
+
+fn process_line(shared_state: Arc<RwLock<Schema>>, line: String) {
+    let value: Value = serde_json::from_str(&line).unwrap();
+
+    traverse_value_map(shared_state, &value);
+}
+
 fn main() {
-    let value: Value = serde_json::from_str(DATA).unwrap();
-    let schema:Schema = vec![];  
+    let file_names = vec!["data_1.ndjson", "data_2.ndjson"];
 
-    traverse_value_map(schema,&value);
+    let mut sender_thread_handles: Vec<JoinHandle<()>> = vec![];
+    let mut receiver_thread_handles: Vec<JoinHandle<()>> = vec![];
 
-    let names = vec!["data_1.ndjson", "data_2.ndjson"];
+    let schema: Schema = vec![];
 
-    let mut handles: Vec<JoinHandle<()>> = vec![];
+    let shared_state = Arc::new(RwLock::new(schema));
 
-    let schema :Schema = vec![];
+    let (tx, rx) = unbounded::<String>();
 
-    let _shared_state = Arc::new(Mutex::new(schema));
-
-    // let (tx, rx) = unbounded();
-
-    for name in names {
-        let handler = thread::spawn(move || {
+    for name in file_names {
+        let tx_handle = tx.clone();
+        let handle = thread::spawn(move || {
             let file = File::open(name).expect("must work");
             let lines = io::BufReader::new(file).lines();
             for line in lines.map_while(Result::ok) {
-                println!("{}", line); // TODO
+                tx_handle.send(line);
             }
         });
-        handles.push(handler);
+        sender_thread_handles.push(handle);
     }
 
-    for handler in handles {
-        handler.join().unwrap();
+    for i in 0..NTHREADS {
+        let rx_handle = rx.clone();
+        let shared_state_clone = Arc::clone(&shared_state);
+        let handle = thread::spawn(move || {
+            loop {
+                let line = rx_handle.recv().unwrap();
+                process_line(Arc::clone(&shared_state_clone), line);
+            }
+            // lock is automatically released when 'value' goes out of scope
+        });
+        receiver_thread_handles.push(handle);
+    }
+
+    for handle in sender_thread_handles {
+        handle.join().unwrap();
+    }
+    for handle in receiver_thread_handles {
+        handle.join().unwrap();
     }
 }
