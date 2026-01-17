@@ -9,7 +9,7 @@ use std::thread;
 use std::thread::JoinHandle;
 
 const NTHREADS: u8 = 5;
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 enum FieldType {
     Int64,
     Float64,
@@ -20,7 +20,7 @@ enum FieldType {
 
 type Schema = Vec<FieldSchema>;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 struct FieldSchema {
     fieldype: FieldType,
     name: String,
@@ -74,17 +74,49 @@ fn traverse_value_map(shared_state: Arc<RwLock<Schema>>, value: &Value) {
         for (key, val) in m {
             if !exists(Arc::clone(&shared_state), key.to_string()) {
                 let (fieldtype, repeated) = match_field_type(&val);
-
                 if let Some(ft) = fieldtype {
-                    let empty_schema: Schema = vec![];
-                    let field = FieldSchema {
-                        name: key.clone(),
-                        fieldype: ft,
-                        repeated: repeated,
-                        required: false,
-                        schema: empty_schema,
-                    };
-                    append(Arc::clone(&shared_state), field);
+                    if ft == FieldType::Record && !repeated {
+                        let nested_schema: Schema = vec![];
+
+                        let shared_sub_state = Arc::new(RwLock::new(nested_schema));
+
+                        traverse_value_map(Arc::clone(&shared_sub_state), &val);
+
+                        let field = FieldSchema {
+                            name: key.clone(),
+                            fieldype: ft,
+                            repeated: repeated,
+                            required: false,
+                            schema: shared_sub_state.read().unwrap().clone(),
+                        };
+                        append(Arc::clone(&shared_state), field);
+                    } else if ft == FieldType::Record && !repeated {
+                        let nested_schema: Schema = vec![];
+
+                        let shared_sub_state = Arc::new(RwLock::new(nested_schema));
+
+                        traverse_value_map(Arc::clone(&shared_sub_state), &val[0]);
+
+                        let field = FieldSchema {
+                            name: key.clone(),
+                            fieldype: ft,
+                            repeated: repeated,
+                            required: false,
+                            schema: shared_sub_state.read().unwrap().clone(),
+                        };
+                        append(Arc::clone(&shared_state), field);
+                    } else {
+                        let empty_schema: Schema = vec![];
+
+                        let field = FieldSchema {
+                            name: key.clone(),
+                            fieldype: ft,
+                            repeated: repeated,
+                            required: false,
+                            schema: empty_schema,
+                        };
+                        append(Arc::clone(&shared_state), field);
+                    }
                 }
             }
         }
@@ -123,7 +155,7 @@ fn process_line(shared_state: Arc<RwLock<Schema>>, line: String) {
 }
 
 fn main() {
-    let file_names = vec!["data_1.ndjson", "data_2.ndjson"];
+    let file_names = vec!["./ndjson/benchmark/test1.ndjson","./ndjson/benchmark/test2.ndjson","./ndjson/benchmark/test3.ndjson","./ndjson/benchmark/test4.ndjson","./ndjson/benchmark/test5.ndjson"];
 
     let mut sender_thread_handles: Vec<JoinHandle<()>> = vec![];
     let mut receiver_thread_handles: Vec<JoinHandle<()>> = vec![];
