@@ -1,4 +1,5 @@
 use crossbeam_channel::unbounded;
+use serde_json::Number;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufRead};
@@ -34,39 +35,30 @@ struct FieldSchema {
     schema: Schema,
 }
 
+fn match_number_type(number: &Number) -> Option<FieldType> {
+    if number.is_f64() {
+        Some(FieldType::Float64)
+    } else if number.is_u64() {
+        Some(FieldType::Int64)
+    } else if number.is_i64() {
+        Some(FieldType::Int64)
+    } else {
+        None
+    }
+}
+
 #[allow(unused)]
 fn match_field_type(v: &Value) -> (Option<FieldType>, bool) {
     match v {
         Value::Null => (None, false),
         Value::Bool(b) => (Some(FieldType::Bool), false),
-        Value::Number(number) => {
-            if number.is_f64() {
-                (Some(FieldType::Float64), false)
-            } else if number.is_u64() {
-                (Some(FieldType::Int64), false)
-            } else if number.is_i64() {
-                (Some(FieldType::Int64), false)
-            } else {
-                (None, false)
-            }
-        }
+        Value::Number(number) => (match_number_type(number), false),
         Value::String(s) => (Some(FieldType::String), false),
         Value::Object(m) => (Some(FieldType::Record), false),
-
         Value::Array(a) => match &a[0] {
             Value::Null => (None, true),
             Value::Bool(b) => (Some(FieldType::Bool), true),
-            Value::Number(number) => {
-                if number.is_f64() {
-                    (Some(FieldType::Float64), true)
-                } else if number.is_u64() {
-                    (Some(FieldType::Int64), true)
-                } else if number.is_i64() {
-                    (Some(FieldType::Int64), true)
-                } else {
-                    (None, true)
-                }
-            }
+            Value::Number(number) => (match_number_type(number), true),
             Value::String(s) => (Some(FieldType::String), true),
             Value::Object(m) => (Some(FieldType::Record), true),
             _ => (None, true),
@@ -78,24 +70,24 @@ fn traverse_value_map(shared_state: Arc<RwLock<Schema>>, value: &Value) {
     if let Value::Object(m) = value {
         for (key, val) in m {
             if !exists(Arc::clone(&shared_state), key.to_string()) {
-                let (fieldtype, repeated) = match_field_type(&val);
+                let (fieldtype, repeated) = match_field_type(val);
                 if let Some(ft) = fieldtype {
                     if ft == FieldType::Record && !repeated {
                         let nested_schema: Schema = vec![];
 
                         let shared_sub_state = Arc::new(RwLock::new(nested_schema));
 
-                        traverse_value_map(Arc::clone(&shared_sub_state), &val);
+                        traverse_value_map(Arc::clone(&shared_sub_state), val);
 
                         let field = FieldSchema {
                             name: key.clone(),
                             fieldype: ft,
-                            repeated: repeated,
+                            repeated,
                             required: false,
                             schema: shared_sub_state.read().unwrap().clone(),
                         };
                         append(Arc::clone(&shared_state), field);
-                    } else if ft == FieldType::Record && !repeated {
+                    } else if ft == FieldType::Record && repeated {
                         let nested_schema: Schema = vec![];
 
                         let shared_sub_state = Arc::new(RwLock::new(nested_schema));
@@ -105,7 +97,7 @@ fn traverse_value_map(shared_state: Arc<RwLock<Schema>>, value: &Value) {
                         let field = FieldSchema {
                             name: key.clone(),
                             fieldype: ft,
-                            repeated: repeated,
+                            repeated,
                             required: false,
                             schema: shared_sub_state.read().unwrap().clone(),
                         };
@@ -116,7 +108,7 @@ fn traverse_value_map(shared_state: Arc<RwLock<Schema>>, value: &Value) {
                         let field = FieldSchema {
                             name: key.clone(),
                             fieldype: ft,
-                            repeated: repeated,
+                            repeated,
                             required: false,
                             schema: empty_schema,
                         };
@@ -185,7 +177,7 @@ fn main() {
             let file = File::open(name).expect("must work");
             let lines = io::BufReader::new(file).lines();
             for line in lines.map_while(Result::ok) {
-                _ = tx_handle.send(line).unwrap();
+                tx_handle.send(line).unwrap();
             }
         });
         sender_thread_handles.push(handle);
@@ -202,9 +194,9 @@ fn main() {
             while !rx_handle.is_empty() {
                 let line = rx_handle.recv().unwrap();
                 process_line(Arc::clone(&shared_state_clone), line);
-                let counter = ATOMIC.fetch_add(1, atomic::Ordering::Relaxed);
+                let _counter = ATOMIC.fetch_add(1, atomic::Ordering::Relaxed);
             }
-            println!("Consumer thread {}: channel is empty",i);
+            println!("Consumer thread {}: channel is empty", i);
         });
         receiver_thread_handles.push(handle);
     }
