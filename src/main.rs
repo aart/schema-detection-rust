@@ -9,7 +9,7 @@ use std::sync::RwLock;
 use std::thread;
 use std::thread::JoinHandle;
 
-const NUMBER_OF_WORKER_THREADS : u8 = 5;
+const NUMBER_OF_WORKER_THREADS : u8 = 10;
 #[derive(Debug, PartialEq, Clone)]
 enum FieldType {
     Int64,
