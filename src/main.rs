@@ -221,7 +221,7 @@ fn main() {
     }
 
     let a = ATOMIC.load(atomic::Ordering::Relaxed);
-    println!("atomic count: {}", a);
+    println!("Atomic count: {}", a);
 
     println!(
         "Elapsed time in milliseconds: {}",
