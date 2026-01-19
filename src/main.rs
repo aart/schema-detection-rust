@@ -192,9 +192,14 @@ fn main() {
         let shared_state_clone = Arc::clone(&shared_state);
         let handle = thread::spawn(move || {
             while !rx_handle.is_empty() {
-                let line = rx_handle.recv().unwrap();
-                process_line(Arc::clone(&shared_state_clone), line);
-                let _counter = ATOMIC.fetch_add(1, atomic::Ordering::Relaxed);
+                let res = rx_handle.try_recv();
+                match res {
+                    Ok(line) => {
+                        process_line(Arc::clone(&shared_state_clone), line);
+                        let _counter = ATOMIC.fetch_add(1, atomic::Ordering::Relaxed);}
+                     Err(_e) => ()  
+                    }
+                
             }
             println!("Consumer thread {}: channel is empty", i);
         });
