@@ -197,13 +197,13 @@ fn main() {
                     Ok(line) => {
                         process_line(Arc::clone(&shared_state_clone), line);
                         let _counter = ATOMIC.fetch_add(1, atomic::Ordering::Relaxed);}
-                     Err(_e) => ()  
+                     Err(e) => println!("{}",e)  
                     }
                 
             }
             println!("Consumer thread {}: channel is empty", i);
         });
-        receiver_thread_handles.push(handle);
+        receiver_thread_handles.push(handle);x
     }
 
     println!("Joining producer threads");
