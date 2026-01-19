@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufRead};
 use std::time::Instant;
+use std::time;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
@@ -143,7 +144,6 @@ fn append(shared_state: Arc<RwLock<Schema>>, new_field: FieldSchema) {
         }
     }
     if !exists {
-        println!("{:?}", new_field);
         schema.push(new_field);
     }
 }
@@ -180,12 +180,18 @@ fn main() {
         sender_thread_handles.push(handle);
     }
 
+    let ten_millis = time::Duration::from_millis(10);
+    thread::sleep(ten_millis);
+  
+
     for _ in 0..NUMBER_OF_WORKER_THREADS {
         let rx_handle = rx.clone();
         let shared_state_clone = Arc::clone(&shared_state);
         let handle = thread::spawn(move || {
-            loop {
+            
+            while !rx_handle.is_empty() {
                 let line = rx_handle.recv().unwrap();
+             
                 process_line(Arc::clone(&shared_state_clone), line);
             }
         });
@@ -195,9 +201,13 @@ fn main() {
     for handle in sender_thread_handles {
         handle.join().unwrap();
     }
+    
     for handle in receiver_thread_handles {
         handle.join().unwrap();
     }
-    println!("Elapsed time: {}", now.elapsed().as_secs());
+    println!("Elapsed time in milliseconds: {}", now.elapsed().as_millis());
+
+    let schema = shared_state.read().unwrap();
+    println!("Schema: {:?}", schema);
     
 }
