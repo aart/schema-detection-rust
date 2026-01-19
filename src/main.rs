@@ -2,14 +2,18 @@ use crossbeam_channel::unbounded;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufRead};
-use std::time::Instant;
-use std::time;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::atomic;
+use std::sync::atomic::AtomicUsize;
 use std::thread;
 use std::thread::JoinHandle;
+use std::time;
+use std::time::Instant;
 
-const NUMBER_OF_WORKER_THREADS : u8 = 10;
+static ATOMIC: AtomicUsize = AtomicUsize::new(0);
+
+const NUMBER_OF_WORKER_THREADS: u8 = 10;
 #[derive(Debug, PartialEq, Clone)]
 enum FieldType {
     Int64,
@@ -157,7 +161,13 @@ fn process_line(shared_state: Arc<RwLock<Schema>>, line: String) {
 fn main() {
     let now = Instant::now();
 
-    let file_names = vec!["./ndjson/benchmark/test1.ndjson","./ndjson/benchmark/test2.ndjson","./ndjson/benchmark/test3.ndjson","./ndjson/benchmark/test4.ndjson","./ndjson/benchmark/test5.ndjson"];
+    let file_names = vec![
+        "./ndjson/benchmark/test1.ndjson",
+        "./ndjson/benchmark/test2.ndjson",
+        "./ndjson/benchmark/test3.ndjson",
+        "./ndjson/benchmark/test4.ndjson",
+        "./ndjson/benchmark/test5.ndjson",
+    ];
 
     let mut sender_thread_handles: Vec<JoinHandle<()>> = vec![];
     let mut receiver_thread_handles: Vec<JoinHandle<()>> = vec![];
@@ -168,6 +178,7 @@ fn main() {
 
     let (tx, rx) = unbounded::<String>();
 
+    println!("Spawning producer threads");
     for name in file_names {
         let tx_handle = tx.clone();
         let handle = thread::spawn(move || {
@@ -182,32 +193,41 @@ fn main() {
 
     let ten_millis = time::Duration::from_millis(10);
     thread::sleep(ten_millis);
-  
 
-    for _ in 0..NUMBER_OF_WORKER_THREADS {
+    println!("Spawning consumer threads");
+    for i in 0..NUMBER_OF_WORKER_THREADS {
         let rx_handle = rx.clone();
         let shared_state_clone = Arc::clone(&shared_state);
         let handle = thread::spawn(move || {
-            
             while !rx_handle.is_empty() {
                 let line = rx_handle.recv().unwrap();
-             
                 process_line(Arc::clone(&shared_state_clone), line);
+                let counter = ATOMIC.fetch_add(1, atomic::Ordering::Relaxed);
             }
+            println!("Consumer thread {}: channel is empty",i);
         });
         receiver_thread_handles.push(handle);
     }
 
+    println!("Joining producer threads");
     for handle in sender_thread_handles {
         handle.join().unwrap();
     }
-    
+
+    println!("Joining consumer threads");
+
     for handle in receiver_thread_handles {
         handle.join().unwrap();
     }
-    println!("Elapsed time in milliseconds: {}", now.elapsed().as_millis());
+
+    let a = ATOMIC.load(atomic::Ordering::Relaxed);
+    println!("atomic count: {}", a);
+
+    println!(
+        "Elapsed time in milliseconds: {}",
+        now.elapsed().as_millis()
+    );
 
     let schema = shared_state.read().unwrap();
     println!("Schema: {:?}", schema);
-    
 }
