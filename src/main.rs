@@ -2,13 +2,13 @@ use crossbeam_channel::unbounded;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufRead};
-
+use std::time::Instant;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::thread;
 use std::thread::JoinHandle;
 
-const NTHREADS: u8 = 5;
+const NUMBER_OF_WORKER_THREADS : u8 = 5;
 #[derive(Debug, PartialEq, Clone)]
 enum FieldType {
     Int64,
@@ -124,7 +124,7 @@ fn traverse_value_map(shared_state: Arc<RwLock<Schema>>, value: &Value) {
 }
 
 fn exists(shared_state: Arc<RwLock<Schema>>, name: String) -> bool {
-    let mut schema = shared_state.read().unwrap();
+    let schema = shared_state.read().unwrap();
     let mut exists = false;
     for field in schema.iter() {
         if field.name == name {
@@ -155,6 +155,8 @@ fn process_line(shared_state: Arc<RwLock<Schema>>, line: String) {
 }
 
 fn main() {
+    let now = Instant::now();
+
     let file_names = vec!["./ndjson/benchmark/test1.ndjson","./ndjson/benchmark/test2.ndjson","./ndjson/benchmark/test3.ndjson","./ndjson/benchmark/test4.ndjson","./ndjson/benchmark/test5.ndjson"];
 
     let mut sender_thread_handles: Vec<JoinHandle<()>> = vec![];
@@ -178,7 +180,7 @@ fn main() {
         sender_thread_handles.push(handle);
     }
 
-    for i in 0..NTHREADS {
+    for _ in 0..NUMBER_OF_WORKER_THREADS {
         let rx_handle = rx.clone();
         let shared_state_clone = Arc::clone(&shared_state);
         let handle = thread::spawn(move || {
@@ -197,4 +199,5 @@ fn main() {
     for handle in receiver_thread_handles {
         handle.join().unwrap();
     }
+    println!("Elapsed time: {}", now.elapsed().as_secs());
 }
