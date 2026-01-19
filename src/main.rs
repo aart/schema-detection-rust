@@ -174,7 +174,7 @@ fn main() {
             let file = File::open(name).expect("must work");
             let lines = io::BufReader::new(file).lines();
             for line in lines.map_while(Result::ok) {
-                tx_handle.send(line);
+                _ = tx_handle.send(line).unwrap();
             }
         });
         sender_thread_handles.push(handle);
@@ -188,7 +188,6 @@ fn main() {
                 let line = rx_handle.recv().unwrap();
                 process_line(Arc::clone(&shared_state_clone), line);
             }
-            // lock is automatically released when 'value' goes out of scope
         });
         receiver_thread_handles.push(handle);
     }
@@ -200,4 +199,5 @@ fn main() {
         handle.join().unwrap();
     }
     println!("Elapsed time: {}", now.elapsed().as_secs());
+    
 }
