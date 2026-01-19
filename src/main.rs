@@ -203,7 +203,7 @@ fn main() {
             }
             println!("Consumer thread {}: channel is empty", i);
         });
-        receiver_thread_handles.push(handle);x
+        receiver_thread_handles.push(handle);
     }
 
     println!("Joining producer threads");
